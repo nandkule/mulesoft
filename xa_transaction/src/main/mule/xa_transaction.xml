@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:bti="http://www.mulesoft.org/schema/mule/ee/bti" xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd
+http://www.mulesoft.org/schema/mule/ee/bti http://www.mulesoft.org/schema/mule/ee/bti/current/mule-bti-ee.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="88d427f8-ea36-4c00-bb43-61b001817213" basePath="/api/" >
+		<http:listener-connection host="0.0.0.0" port="8085" />
+	</http:listener-config>
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="0b301700-4e4d-4201-9f91-e0adb6308cd2" >
+		<db:oracle-connection host="localhost" user="system" password="system" serviceName="XE" useXaTransactions="true"/>
+	</db:config>
+	<file:config name="File_Config" doc:name="File Config" doc:id="463ff8bb-369f-40bc-8271-08349ded93a1" >
+		<file:connection workingDir="D:\Mulesoft_data\POC" />
+	</file:config>
+	<jms:config name="JMS_Config" doc:name="JMS Config" doc:id="e6811365-8255-4923-8b29-57f9af1663da" >
+		<jms:active-mq-connection username="admin" password="admin" >
+			<jms:caching-strategy >
+				<jms:no-caching />
+			</jms:caching-strategy>
+			<jms:factory-configuration brokerUrl="tcp://localhost:61616" enable-xa="true"/>
+		</jms:active-mq-connection>
+	</jms:config>
+	<bti:transaction-manager doc:name="Bitronix Transaction Manager" doc:id="99a2cba8-eca6-4c06-957d-766b71cf9c0b" />
+	<flow name="xa_transactionFlow" doc:id="9f046ccc-3be8-4f47-b499-0da0491ba4b4" >
+		<http:listener doc:name="Listener" doc:id="3f2150bd-f7cd-4e13-8c03-fe22ee1cd28f" config-ref="HTTP_Listener_config" path="/non_xa"/>
+		<logger level="INFO" doc:name="Logger" doc:id="309d3d23-0947-4d3f-87d7-e7c291ad8a63" message="---flow started--- #[payload]"/>
+		<set-variable value="#[payload]" doc:name="Set Variable" doc:id="9c430ca4-bd51-4057-b3a4-3470ce340734" variableName="vreq"/>
+		<db:select doc:name="Select" doc:id="6f9351cf-17d4-41f6-848b-67c2308a8f1c" config-ref="Database_Config">
+			<db:sql ><![CDATA[select * from banking where acc_id=:id]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	"id":payload.sender_id
+}]]]></db:input-parameters>
+		</db:select>
+		<logger level="INFO" doc:name="Logger" doc:id="6cdf5dfe-ee04-47af-90db-b54024cc88a4" message="------------SELECT DONE----------"/>
+		<jms:publish doc:name="Publish" doc:id="8488c511-452e-435b-be9d-3f099e374f8b" config-ref="JMS_Config" destination="banking.mule.queue">
+			<jms:message >
+				<jms:body ><![CDATA[#[vars.vreq]]]></jms:body>
+			</jms:message>
+		</jms:publish>
+		<db:update doc:name="Debit" doc:id="74bde3b4-1c88-4004-b350-c3877e008505" config-ref="Database_Config">
+			<db:sql ><![CDATA[update banking set balance=(balance-:tx_amount) where acc_id=:account_id]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	"tx_amount": vars.vreq.tx_amount as Number,
+	"account_id": vars.vreq.sender_id
+}]]]></db:input-parameters>
+		</db:update>
+		<logger level="INFO" doc:name="Logger" doc:id="263ca74a-9797-4f50-b8d3-97d3302de74a" message="------------1 UPADTE DONE----------"/>
+		<ee:transform doc:name="Transform Message" doc:id="a4d5e1b2-2e2d-41ba-8d8f-9bd2853b72d2" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+import * from dw::Runtime
+output application/java
+---
+if(vars.vreq.tx_amount<100) fail("less than 100 transation not allowed") 
+else payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<db:update doc:name="Credit" doc:id="d760f1eb-cdcb-4cef-93ad-821bfa7600f7" config-ref="Database_Config">
+			<db:sql><![CDATA[update banking set balance=(balance+:tx_amount) where acc_id=:account_id]]></db:sql>
+			<db:input-parameters><![CDATA[#[{
+	"tx_amount": vars.vreq.tx_amount as Number,
+	"account_id": vars.vreq.receiver_id as Number
+}]]]></db:input-parameters>
+		</db:update>
+		<logger level="INFO" doc:name="Logger" doc:id="10a1d8bf-67fa-411e-93a6-b1806b5cf458" message="------------1 UPADTE DONE----------"/>
+		<ee:transform doc:name="Transform Message" doc:id="b458b784-9154-4cac-9d96-1266d4bbd666" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="xa_transactionFlow1" doc:id="74b37539-eb8d-49aa-891d-f12b5799e32b" >
+		<http:listener doc:name="Listener" doc:id="7eaadc9a-8adf-4de8-bf08-6cec10ffb0ba" config-ref="HTTP_Listener_config" path="/withxa"/>
+		<logger level="INFO" doc:name="Logger" doc:id="67da99b1-c6c0-4d09-a153-2e7e0932d4b6" message="---flow started--- #[payload]" />
+		<set-variable value="#[payload]" doc:name="Set Variable" doc:id="f7ac0ed5-4312-4582-b413-58b5150d0f92" variableName="vreq" />
+		<db:select doc:name="Select" doc:id="c809aa56-cbdc-489f-bbed-0221d196a573" config-ref="Database_Config" >
+			<db:sql ><![CDATA[select * from banking where acc_id=:id]]></db:sql>
+			<db:input-parameters ><![CDATA[#[{
+	"id":payload.sender_id
+}]]]></db:input-parameters>
+		</db:select>
+		<logger level="INFO" doc:name="Logger1" doc:id="1b4525b5-c210-4dab-b2be-1e7ac44c26ae" message="------------SELECT DONE----------" />
+		<try doc:name="Try" doc:id="f9ca2d7e-905f-4b12-8550-e980160811ef" transactionalAction="ALWAYS_BEGIN" transactionType="XA">
+			<jms:publish doc:name="Publish" doc:id="8b70aa66-b264-40ba-a198-92ac15a7a9db" config-ref="JMS_Config" destination="banking.mule.queue">
+			<jms:message>
+				<jms:body><![CDATA[#[vars.vreq]]]></jms:body>
+			</jms:message>
+		</jms:publish>
+			<db:update doc:name="Debit" doc:id="11b8c25c-135f-45f0-8e34-d00e928f57ba" config-ref="Database_Config">
+			<db:sql><![CDATA[update banking set balance=(balance-:tx_amount) where acc_id=:account_id]]></db:sql>
+			<db:input-parameters><![CDATA[#[{
+	"tx_amount": vars.vreq.tx_amount as Number,
+	"account_id": vars.vreq.sender_id
+}]]]></db:input-parameters>
+		</db:update>
+			<logger level="INFO" doc:name="Logger2" doc:id="a878ac22-bd7c-4cd9-a243-abc81987f19a" message="------------1 UPADTE DONE----------" />
+			<ee:transform doc:name="Transform Message" doc:id="1fdc2dd3-1fef-4f5c-8a18-8986cbf08036">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+import * from dw::Runtime
+output application/java
+---
+if(vars.vreq.tx_amount<100) fail("less than 100 transation not allowed") 
+else payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+			<db:update doc:name="Credit" doc:id="2b171cb9-1a0e-4a71-af68-e7a14453f3ed" config-ref="Database_Config">
+			<db:sql><![CDATA[update banking set balance=(balance+:tx_amount) where acc_id=:account_id]]></db:sql>
+			<db:input-parameters><![CDATA[#[{
+	"tx_amount": vars.vreq.tx_amount as Number,
+	"account_id": vars.vreq.receiver_id as Number
+}]]]></db:input-parameters>
+		</db:update>
+			<logger level="INFO" doc:name="Logger3" doc:id="3342618b-3fcb-4cb4-b2e6-29b7fee7b4c6" message="------------1 UPADTE DONE----------" />
+		</try>
+		<ee:transform doc:name="Transform Message1" doc:id="b9de8f5f-b958-4bb5-b5bb-59cdb7697282" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+</mule>
