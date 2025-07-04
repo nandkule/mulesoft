@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="9d498fe8-b544-4916-aa9b-6f5c5e4e0f00" basePath="${http.basepath}" >
+		<http:listener-connection host="0.0.0.0" port="${http.port}" />
+	</http:listener-config>
+	<db:config name="Database_Config" doc:name="Database Config" doc:id="c94911e2-05e0-447f-834a-5438ac49b43e" >
+		<db:oracle-connection host="${db.host}" port="${db.port}" user="${db.user}" password="${secure::db.password}" serviceName="${db.servicename}" />
+	</db:config>
+	<configuration-properties doc:name="Configuration properties" doc:id="6e6929a7-7a94-4250-b453-962e811222fa" file="${env}.properties" />
+	<secure-properties:config name="Secure_Properties_Config" doc:name="Secure Properties Config" doc:id="daff299b-2369-4634-acb7-00599531c370" file="${env}.properties" key="Password@1" >
+		<secure-properties:encrypt algorithm="Blowfish" />
+	</secure-properties:config>
+	<flow name="Flow1Flow" doc:id="994cb62b-9f48-40ce-93eb-8cc2f831c4e7" >
+		<http:listener doc:name="Listener" doc:id="66f5ca56-acb8-4dc0-bccf-77cf27894714" config-ref="HTTP_Listener_config" path="${http.path}"/>
+		<logger level="INFO" doc:name="Logger" doc:id="cc8cbdc0-83f2-4dfa-9e3a-9734c13ab346" />
+		<db:select doc:name="Select" doc:id="b6a36da7-fd26-4358-9ac9-4bc61f13f8c7" config-ref="Database_Config">
+			<db:sql ><![CDATA[select * from employee]]></db:sql>
+		</db:select>
+		<ee:transform doc:name="Transform Message" doc:id="6823f027-cedc-4427-b7e8-48b749621b1b" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="30a84965-3d48-4b66-8b56-3a642f2866a0" />
+	</flow>
+</mule>
